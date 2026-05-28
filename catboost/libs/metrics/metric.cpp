@@ -1766,6 +1766,141 @@ TVector<TParamSet> TTweedieMetric::ValidParamSets() {
     };
 }
 
+
+/* TweedieWithUncertainty
+ *
+ * Reports -log L for the Tweedie distribution under the saddlepoint approximation
+ * for y > 0 and the exact point-mass log-density for y = 0. See the corresponding
+ * TTweedieWithUncertaintyError class in catboost/private/libs/algo_helpers/error_functions.h
+ * for the formulas and rationale.
+ */
+
+namespace {
+    class TTweedieWithUncertaintyMetric final: public TAdditiveSingleTargetMetric {
+    public:
+        explicit TTweedieWithUncertaintyMetric(const TLossParams& params, double variance_power)
+            : TAdditiveSingleTargetMetric(ELossFunction::TweedieWithUncertainty, params)
+            , VariancePower(variance_power) {
+            CB_ENSURE(VariancePower > 1 && VariancePower < 2,
+                "TweedieWithUncertainty is defined for 1 < variance_power < 2, got " << variance_power);
+        }
+
+        static TVector<THolder<IMetric>> Create(const TMetricConfig& config);
+        static TVector<TParamSet> ValidParamSets();
+
+        TMetricHolder EvalSingleThread(
+            TConstArrayRef<TConstArrayRef<double>> approx,
+            TConstArrayRef<TConstArrayRef<double>> approxDelta,
+            bool isExpApprox,
+            TConstArrayRef<float> target,
+            TConstArrayRef<float> weight,
+            TConstArrayRef<TQueryInfo> queriesInfo,
+            int begin, int end
+        ) const override;
+
+        void GetBestValue(EMetricBestValue* valueType, float* bestValue) const override;
+        double GetFinalError(const TMetricHolder& error) const override;
+
+    private:
+        const double VariancePower;
+    };
+}
+
+// static
+TVector<THolder<IMetric>> TTweedieWithUncertaintyMetric::Create(const TMetricConfig& config) {
+    CB_ENSURE(config.GetParamsMap().contains("variance_power"),
+        "Metric " << ELossFunction::TweedieWithUncertainty << " requires variance_power");
+    config.ValidParams->insert("variance_power");
+    return AsVector(MakeHolder<TTweedieWithUncertaintyMetric>(
+        config.Params,
+        FromString<float>(config.GetParamsMap().at("variance_power"))));
+}
+
+TMetricHolder TTweedieWithUncertaintyMetric::EvalSingleThread(
+    TConstArrayRef<TConstArrayRef<double>> approx,
+    TConstArrayRef<TConstArrayRef<double>> approxDelta,
+    bool isExpApprox,
+    TConstArrayRef<float> target,
+    TConstArrayRef<float> weights,
+    TConstArrayRef<TQueryInfo> /*queriesInfo*/,
+    int begin, int end
+) const {
+    Y_ASSERT(!isExpApprox);
+    CB_ENSURE(approx.size() == 2, "Approx dimension for TweedieWithUncertainty should be 2");
+
+    const auto evalImpl = [=, this](auto useWeights, auto hasDelta) {
+        const auto getApprox = [=](int dim, int idx) {
+            return approx[dim][idx] + (hasDelta ? approxDelta[dim][idx] : 0);
+        };
+        const auto getWeight = [=](int idx) { return useWeights ? weights[idx] : 1.0f; };
+
+        const double oneMinusP = 1.0 - VariancePower;
+        const double twoMinusP = 2.0 - VariancePower;
+        const double invOneMinusP = 1.0 / oneMinusP;
+        const double invTwoMinusP = 1.0 / twoMinusP;
+        const double invOneTwoMinusP = invOneMinusP * invTwoMinusP;
+
+        TMetricHolder error(2);
+        double totalLoss = 0;
+        double totalWeight = 0;
+
+        for (auto i : xrange(begin, end)) {
+            const double z1 = getApprox(0, i);
+            const double z2 = getApprox(1, i);
+            const double y  = target[i];
+            const double w  = getWeight(i);
+
+            const double mu = std::exp(z1);
+            const double invPhi = std::exp(-z2);
+            const double muPow2mP = std::exp(z1 * twoMinusP);
+
+            double loss;
+            if (y > 1e-18) {
+                const double muPow1mP = muPow2mP / mu;
+                const double term1 = std::pow(y, twoMinusP) * invOneTwoMinusP;
+                const double term2 = y * muPow1mP * invOneMinusP;
+                const double term3 = muPow2mP * invTwoMinusP;
+                const double deviance = 2.0 * (term1 - term2 + term3);
+                const double logYP = VariancePower * std::log(y);
+
+                loss = 0.9189385332 + 0.5 * z2 + 0.5 * logYP + deviance * invPhi * 0.5;
+            } else {
+                // Exact -log L at y = 0
+                loss = muPow2mP * invPhi * invTwoMinusP;
+            }
+
+            totalLoss   += w * loss;
+            totalWeight += w;
+        }
+        error.Stats[0] += totalLoss;
+        error.Stats[1] += totalWeight;
+        return error;
+    };
+
+    return DispatchGenericLambda(evalImpl, !weights.empty(), !approxDelta.empty());
+}
+
+double TTweedieWithUncertaintyMetric::GetFinalError(const TMetricHolder& error) const {
+    return error.Stats[1] == 0 ? 0 : error.Stats[0] / error.Stats[1];
+}
+
+void TTweedieWithUncertaintyMetric::GetBestValue(EMetricBestValue* valueType, float* bestValue) const {
+    *valueType = EMetricBestValue::Min;
+    if (bestValue) *bestValue = 0;
+}
+
+TVector<TParamSet> TTweedieWithUncertaintyMetric::ValidParamSets() {
+    return {
+        TParamSet{
+            {
+                TParamInfo{"use_weights", false, true},
+                TParamInfo{"variance_power", true, {}}
+            },
+            ""
+        }
+    };
+}
+
 /* Focal loss */
 
 namespace {
@@ -6394,6 +6529,9 @@ TVector<THolder<IMetric>> CreateMetric(ELossFunction metric, const TLossParams& 
         case ELossFunction::Tweedie:
             AppendTemporaryMetricsVector(TTweedieMetric::Create(config), &result);
             break;
+        case ELossFunction::TweedieWithUncertainty:
+            AppendTemporaryMetricsVector(TTweedieWithUncertaintyMetric::Create(config), &result);
+            break;
         case ELossFunction::Focal:
             AppendTemporaryMetricsVector(TFocalMetric::Create(config), &result);
             break;
@@ -6646,6 +6784,8 @@ TVector<TParamSet> ValidParamSets(ELossFunction metric) {
             return TPoissonMetric::ValidParamSets();
         case ELossFunction::Tweedie:
             return TTweedieMetric::ValidParamSets();
+        case ELossFunction::TweedieWithUncertainty:
+            return TTweedieWithUncertaintyMetric::ValidParamSets();
         case ELossFunction::Cox:
             return TCoxMetric::ValidParamSets();
         case ELossFunction::Focal:

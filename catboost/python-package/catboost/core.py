@@ -2910,7 +2910,7 @@ class CatBoost(_CatBoostBase):
             )
         return data, is_single_object
 
-    def _validate_prediction_type(self, prediction_type, valid_prediction_types=('Class', 'RawFormulaVal', 'Probability', 'LogProbability', 'Exponent', 'RMSEWithUncertainty')):
+    def _validate_prediction_type(self, prediction_type, valid_prediction_types=('Class', 'RawFormulaVal', 'Probability', 'LogProbability', 'Exponent', 'RMSEWithUncertainty', 'TweedieWithUncertainty')):
         if not isinstance(prediction_type, STRING_TYPES):
             raise CatBoostError("Invalid prediction_type type={}: must be str.".format(type(prediction_type)))
         if prediction_type not in valid_prediction_types:
@@ -6323,6 +6323,8 @@ class CatBoostRegressor(CatBoost):
         params = self._get_canonized_params()
         loss_function = params.get('loss_function')
         if loss_function and isinstance(loss_function, str):
+            if loss_function.startswith('TweedieWithUncertainty'):
+                return 'TweedieWithUncertainty'
             if loss_function.startswith('Poisson') or loss_function.startswith('Tweedie'):
                 return 'Exponent'
             if loss_function == 'RMSEWithUncertainty':

@@ -89,6 +89,7 @@ TTargetClassifier BuildTargetClassifier(
         case ELossFunction::UserPerObjMetric:
         case ELossFunction::UserQuerywiseMetric:
         case ELossFunction::Tweedie:
+        case ELossFunction::TweedieWithUncertainty:
         case ELossFunction::Focal:
         case ELossFunction::LogCosh:
             return TTargetClassifier(

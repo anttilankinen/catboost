@@ -145,6 +145,7 @@ enum class ELossFunction {
     RMSPE,
 
     RMSEWithUncertainty,
+    TweedieWithUncertainty,
 
     /* multiclassification errors */
 
@@ -257,6 +258,7 @@ enum class EPredictionType {
     RawFormulaVal,
     Exponent,
     RMSEWithUncertainty,
+    TweedieWithUncertainty,
     InternalRawFormulaVal,
     VirtEnsembles,
     TotalUncertainty

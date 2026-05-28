@@ -447,6 +447,9 @@ MakeRegister(LossInfos,
         EMetricAttribute::IsRegression
         | EMetricAttribute::HasGpuImplementation
     ),
+    Registree(TweedieWithUncertainty,
+        EMetricAttribute::IsRegression
+    ),
     Registree(Focal,
         EMetricAttribute::IsBinaryClassCompatible
     )
@@ -545,7 +548,8 @@ static const TVector<ELossFunction> RegressionObjectives = {
     ELossFunction::Lq,
     ELossFunction::Huber,
     ELossFunction::Tweedie,
-    ELossFunction::Cox
+    ELossFunction::TweedieWithUncertainty,
+    ELossFunction::Cox,
 };
 
 static const TVector<ELossFunction> MultiRegressionObjectives = {

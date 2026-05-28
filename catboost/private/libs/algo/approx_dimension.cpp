@@ -13,7 +13,8 @@ namespace NCB {
         ui32 targetDimension
     ) {
         const ELossFunction lossFunction = catBoostOptions.LossFunctionDescription.Get().GetLossFunction();
-        if (lossFunction == ELossFunction::RMSEWithUncertainty) {
+        if (lossFunction == ELossFunction::RMSEWithUncertainty
+            || lossFunction == ELossFunction::TweedieWithUncertainty) {
             return ui32(2);
         } else if (lossFunction == ELossFunction::MultiQuantile) {
             const auto& paramsMap = catBoostOptions.LossFunctionDescription.Get().GetLossParams().GetParamsMap();

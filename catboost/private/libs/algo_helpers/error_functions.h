@@ -1664,6 +1664,86 @@ private:
     }
 };
 
+class TTweedieWithUncertaintyError final : public TMultiDerCalcer {
+public:
+    const double VariancePower;
+    const double OneMinusP;        // 1 - p
+    const double TwoMinusP;        // 2 - p
+    const double InvOneMinusP;     // 1 / (1 - p)
+    const double InvTwoMinusP;     // 1 / (2 - p)
+    const double InvOneTwoMinusP;  // 1 / ((1 - p)(2 - p))
+
+    explicit TTweedieWithUncertaintyError(double variancePower)
+        : TMultiDerCalcer(EHessianType::Diagonal)
+        , VariancePower(variancePower)
+        , OneMinusP(1.0 - variancePower)
+        , TwoMinusP(2.0 - variancePower)
+        , InvOneMinusP(1.0 / OneMinusP)
+        , InvTwoMinusP(1.0 / TwoMinusP)
+        , InvOneTwoMinusP(InvOneMinusP * InvTwoMinusP)
+    {
+        Y_ASSERT(VariancePower > 1 && VariancePower < 2);
+    }
+
+    void CalcDers(
+        TConstArrayRef<double> approx,
+        TConstArrayRef<float> target,
+        float weight,
+        TVector<double>* der,
+        THessianInfo* der2
+    ) const override {
+        Y_ASSERT(target.size() == 1);
+        // Heteroscedastic Tweedie loss: approx[0] = log(mu), approx[1] = log(phi).
+        //
+        // We use raw MLE gradients with the Fisher information as the Hessian,
+        // so the Newton step implicitly computes the natural gradient.
+        //
+        // For y = 0, the exact log-density is available in closed form. However, the exact phi-gradient is
+        // strictly positive for y = 0 and permanently inflates phi.
+        // The fix is to use the SPA gradient when y > 0 and its limit as y -> 0 when y = 0:
+        //
+        //    lim_{y->0} 0.5 * (d(y,mu)/phi - 1) = F00 * InvTwoMinusP - 0.5
+        //
+        // This anchors the fixed point at phi = d(y,mu), consistent with y > 0.
+        // The exact mu-gradient and the limit of the SPA gradient as y -> 0 are identical,
+        // so the mean head requires no correction.
+
+
+        const double y = target[0];
+        const double z1 = approx[0];
+        const double z2 = approx[1];
+
+        const double mu = std::exp(z1);
+        const double invPhi = std::exp(-z2);
+        const double muPow2mP = std::exp(z1 * TwoMinusP);
+        const double muPow1mP = muPow2mP / mu;
+
+        const double F00 = muPow2mP * invPhi;   // mu^(2-p) / phi
+
+        if (der2 != nullptr) {
+            constexpr int dim = 2;
+            constexpr double F11 = 0.5;
+            Y_ASSERT(der2->HessianType == EHessianType::Diagonal &&
+                der2->ApproxDimension == dim);
+            der2->Data[0] = -weight * F00;
+            der2->Data[1] = -weight * F11;
+        }
+
+        (*der)[0] = weight * (y - mu) * muPow1mP * invPhi;
+
+        if (y > 1e-18) {
+            const double deviance = 2.0 * (
+                  std::pow(y, TwoMinusP) * InvOneTwoMinusP
+                - y * muPow1mP * InvOneMinusP
+                + muPow2mP * InvTwoMinusP
+            );
+            (*der)[1] = weight * 0.5 * (deviance * invPhi - 1.0);
+        } else {
+            (*der)[1] = weight * (F00 * InvTwoMinusP - 0.5);
+        }
+    }
+};
+
 void CheckDerivativeOrderForObjectImportance(ui32 derivativeOrder, ELeavesEstimation estimationMethod);
 
 class TFocalError final : public IDerCalcer {

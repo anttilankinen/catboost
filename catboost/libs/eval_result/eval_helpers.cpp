@@ -425,6 +425,12 @@ void PrepareEval(
             (*result)[0] = approx[0];
             (*result)[1] = CalcSquaredExponent(approx[1]);
             break;
+        case EPredictionType::TweedieWithUncertainty:
+            Y_ASSERT(approx.size() == 2);
+            result->resize(2);
+            (*result)[0] = CalcExponent(approx[0]);
+            (*result)[1] = CalcExponent(approx[1]);
+            break;
         case EPredictionType::VirtEnsembles: {
             auto lossFunction = FromString<ELossFunction>(lossFunctionName);
             if (IsRegressionMetric(lossFunction)) {
