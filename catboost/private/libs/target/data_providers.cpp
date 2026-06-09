@@ -375,6 +375,8 @@ namespace NCB {
         bool hasMultiLabelOnlyMetrics = isAnyOfMetrics(IsMultiLabelOnlyMetric);
         bool hasSurvivalAft = isAnyOfMetrics(
             [] (auto metric) { return metric == ELossFunction::SurvivalAft; });
+        bool hasTweedieWithUncertainty = isAnyOfMetrics(
+            [] (auto metric) { return metric == ELossFunction::TweedieWithUncertainty; });
         bool hasGroupwiseMetrics = isAnyOfMetrics(IsGroupwiseMetric);
         bool hasUserDefinedMetrics = isAnyOfMetrics(IsUserDefined);
 
@@ -416,13 +418,14 @@ namespace NCB {
                     CB_ENSURE(
                         IsMultiClassCompatibleMetric(metricLossFunction)
                         || IsMultiTargetMetric(metricLossFunction)
-                        || hasRMSEWithUncertainty || hasMultiQuantile,
+                        || hasRMSEWithUncertainty || hasMultiQuantile || hasTweedieWithUncertainty,
                         "Metric " << metricLossFunction << " is incompatible with multi-dimensional predictions "
-                        "(should be RMSEWithUncertainty, MultiQuantile, or a multi-classification metric, "
-                        " or a multi-target metric)"
+                        "(should be RMSEWithUncertainty, MultiQuantile, TweedieWithUncertainty, "
+                        "or a multi-classification metric, or a multi-target metric)"
                     );
                 }
-                multiClassTargetData = !hasMultiRegressionOrSurvivalMetrics && !hasRMSEWithUncertainty && !hasMultiQuantile;
+                multiClassTargetData = !hasMultiRegressionOrSurvivalMetrics && !hasRMSEWithUncertainty
+                    && !hasMultiQuantile && !hasTweedieWithUncertainty;
                 if (multiClassTargetData && !knownClassCount) {
                     classTargetData = true;
 
